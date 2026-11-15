@@ -1,6 +1,6 @@
 ---
 name: muse-guardian
-description: "在全新沙盒/新账号上从零部署一套「CF Server Monitor 探针 + 三层保活 + Hermes 微信机器人 + MuseAutoApprove（muse.ai 外联审批自动批准）」：Cloudflare Worker 后台、cf-probe 探针、持久化脚本布局、离线包缓存、Hermes 安装与模型 API 配置、微信扫码绑定、沙盒内看门狗、平台 hook 探针（检测/恢复拆分）、平台开机钩子、端到端验证。开工先问「全部安装 / 逐模块」（默认逐模块）；全文按 5 个模块 + 收尾组织，同一模块内连续执行，只在用户必须输入/扫码/平台点击时打断；每步五段式（命令 / 话术 / 用户手动动作 / 做完的标志 / 排错表格），全部脚本完整代码直接内嵌，复制即可用。触发词：部署保活、给新账号也来一套、装探针、微信机器人、沙盒重建恢复、保活脚本、自动审批、审批卡片、MuseAutoApprove。"
+description: "在全新沙盒/新账号上从零部署一套「CF Server Monitor 探针 + 三层保活 + Hermes 微信机器人」：Cloudflare Worker 后台、cf-probe 探针、持久化脚本布局、离线包缓存、Hermes 安装与模型 API 配置、微信扫码绑定、沙盒内看门狗、平台 hook 探针（检测/恢复拆分）、平台开机钩子、端到端验证。开工先问「全部安装 / 逐模块」（默认逐模块）；全文按 4 个模块 + 收尾组织，同一模块内连续执行，只在用户必须输入/扫码/平台点击时打断；每步五段式（命令 / 话术 / 用户手动动作 / 做完的标志 / 排错表格），全部脚本完整代码直接内嵌，复制即可用。触发词：部署保活、给新账号也来一套、装探针、微信机器人、沙盒重建恢复、保活脚本。"
 version: 2.6.0
 license: MIT
 metadata:
@@ -15,7 +15,6 @@ metadata:
         hermes,
         weixin,
         deployment,
-        muse-auto-approve,
       ]
     related_skills: [weixin-instant-ack, sandbox-environment-recon]
 ---
@@ -36,14 +35,13 @@ metadata:
 | Layer 2a   | 平台 hook 探针（每 10 秒 bash 轮询，跑在沙盒外；健康零 token，连续异常才唤醒 agent 恢复） | 整机被重建，沙盒内 cron 全灭             | 10 秒级发现，约 2 分钟恢复 |
 | Layer 2b   | 平台原生开机钩子（每次启动跑一次）                                           | 同上，但更快（开机即恢复）               | 开机后约 100 秒             |
 | Layer 3    | `restore-all.sh`（幂等一键恢复）                                             | 被 1、2a、2b 调用                        | 约 2 分钟                   |
-| 审批自动化 | `MuseAutoApprove`（沙盒内 node 常驻；步骤 1–4 安装启动、第 15 步起接入保活） | 沙盒访问新域名时平台弹审批卡片、外联卡住 | 默认每 10 秒一轮询          |
 
 平台重建无法阻止，本手册只保证「重建后自动恢复」。
 
 ## 二、怎么用这本手册（AI 必须遵守的行事规则）
 
 1. **开工先问执行方式；默认逐模块。** 动手之前先问用户选哪种（话术见第三章开头）：
-   - **A. 全部安装**：一口气把 5 个模块 + 收尾全做完，只在下面 8 个介入点停。
+   - **A. 全部安装**：一口气把 4 个模块 + 收尾全做完，只在下面 6 个介入点停。
    - **B. 逐模块（默认）**：每做完一个模块汇报一次，等用户说"继续"再做下一个。用户没明确选就按 B。
    - **同一模块内的步骤连着做完**，不要逐步确认；纯沙盒内的动作（跑脚本、装服务、写 cron、改文件）全部自己做完。
    - **只在用户必须到场时停**：需要用户输入（账号、密钥、策略）、扫码、或在平台/网页端点击时，才停下把话术发出去，等用户回复再往下。这些点见「必须用户介入的环节」。
@@ -56,7 +54,7 @@ metadata:
 3. **每条命令都要真跑过。** 报告结果时说清楚「跑了什么、看到什么」。跑不了就直说跑不了，不要编造输出。
 4. **密钥纪律（四条铁律，违反必出事）**：
    - 真实 SECRET / API Key / Worker 域名 / API 地址**绝不写进任何文档、Skill、日志、记忆**——本手册里全用占位符：`<PROBE_ID>`、`<API_SECRET>`、`<WORKER_URL>`、`<API_BASE_URL>`、`<MODEL_NAME>`。
-   - 密钥优先**让用户自己生成**，通过**安全页面**发给你；只有用户明确同意时才由 AI 生成并在聊天里**一次性**显示。（例外：MuseAutoApprove 的 muse.ai 账号密码——沙盒里没有可用安全入口，按用户要求**走聊天框明文**，见第六章。）
+   - 密钥优先**让用户自己生成**，通过**安全页面**发给你；只有用户明确同意时才由 AI 生成并在聊天里**一次性**显示。
    - **先脱敏再打印**，不是"先打印再脱敏"。需要确认密钥存在，就只输出计数/长度/路径/布尔值，不输出值本身。
    - 含密钥的文件（`install-cf-probe.sh`、`~/.hermes/.env`）权限一律 600，且**不要用文件读取工具打开**（内容会进会话历史）。
 5. **谁做什么**（重要，别硬揽）：
@@ -66,29 +64,28 @@ metadata:
 
 ### 模块地图（执行顺序）
 
-整条流程分成 **5 个模块 + 收尾**，**顺序不可乱**（MAA 最先装：部署全程要出网，先让审批能自动批；保活补丁必须在脚本落盘〔步骤 7〕与看门狗 cron〔步骤 11〕之后）。**按 A/B 模式连着做，只在介入点停**：
+整条流程分成 **4 个模块 + 收尾**，**顺序不可乱**（保活接入必须在脚本落盘〔步骤 7〕与看门狗 cron〔步骤 11〕之后）。**按 A/B 模式连着做，只在介入点停**：
+
+> 注：本 fork 已移除原模块 A（步骤 1–4）及原步骤 15、16–19 中的相关内容，其余步骤编号不变。
 
 | 模块                 | 干什么                                              | 步骤  | 章节        | 要用户做什么                                      |
 | -------------------- | --------------------------------------------------- | ----- | ----------- | ------------------------------------------------- |
-| **A｜自动审批底座**  | 装 MuseAutoApprove 并常驻，外联审批自动批           | 1–4   | 四~七       | 选策略 + 发 muse.ai 账号密码 + 首次装包点一次卡片 |
 | **B｜监控与探针**    | CF 监控后台 + cf-probe 探针                         | 5–6   | 八~九       | 给 CF Token（或网页部署）+ 后台拿安装命令         |
 | **C｜保活底座**      | 保活脚本落盘 + 离线包缓存                           | 7–8   | 十~十一     | 无（全自动）                                      |
 | **D｜微信机器人**    | 装 Hermes + 接模型 API + 微信扫码绑定与配对         | 9–10  | 十二~十三   | 模型 API 地址/Key + 微信扫码 + 转配对码           |
-| **E｜三层保活接入**  | Layer 1 看门狗、平台授权、Layer 2a/2b、MAA 保活补丁 | 11–15 | 十四~十八   | 平台端点 3 项授权                                 |
-| **收尾｜验收与运维** | MAA 验证/排障/交互/升级、最终验证                   | 16–20 | 十九~二十三 | 微信发消息测试 + 决定是否做重建演练               |
+| **E｜三层保活接入**  | Layer 1 看门狗、平台授权、Layer 2a/2b | 11–14 | 十四~十七   | 平台端点 3 项授权                                 |
+| **收尾｜验收与运维** | 最终验证                   | 20 | 二十三 | 微信发消息测试 + 决定是否做重建演练               |
 
-### 必须用户介入的环节（只有这 8 处要停）
+### 必须用户介入的环节（只有这 6 处要停）
 
 除下列各处，其余全程自动。到这些点才发话术、等用户回复：
 
 1. **开工询问 + 平台设置**：先问执行方式（A 全部安装 / B 逐模块，默认 B）；再在网页把「直接网络协议」全开、「连接器 → 浏览器」（除上传文件）全改为允许（第三章）。
-2. **MAA 策略与账号**：选 A（永久允许）/ B（每次只批一次）；把 muse.ai 邮箱密码发在聊天框（步骤 1、3）。
-3. **首次装包卡片**：`git clone` / `npm install` 弹审批卡片时，用户手动点一次「允许」（步骤 2）。
-4. **CF 后台**：给 Cloudflare API Token（或自己在网页部署）；后台「添加服务器」把安装命令贴回来；定 `API_SECRET`（步骤 5）。
-5. **模型 API**：接口地址 + API Key + 模型名（步骤 9）。
-6. **微信扫码**：手机扫码 + 确认登录；之后把机器人回的**配对码**转给 AI（步骤 10）。
-7. **平台授权**：平台端确认「保活探针 hook / 开机钩子 / root 执行」3 项（步骤 12）。
-8. **最终验证**：微信给机器人发消息测试；决定是否做重建演练（步骤 20）。
+2. **CF 后台**：给 Cloudflare API Token（或自己在网页部署）；后台「添加服务器」把安装命令贴回来；定 `API_SECRET`（步骤 5）。
+3. **模型 API**：接口地址 + API Key + 模型名（步骤 9）。
+4. **微信扫码**：手机扫码 + 确认登录；之后把机器人回的**配对码**转给 AI（步骤 10）。
+5. **平台授权**：平台端确认「保活探针 hook / 开机钩子 / root 执行」3 项（步骤 12）。
+6. **最终验证**：微信给机器人发消息测试；决定是否做重建演练（步骤 20）。
 
 ## 三、开工前的询问与设置 + 两次探测
 
@@ -102,7 +99,7 @@ metadata:
 >
 > **一、执行方式**，你选一个：
 >
-> - **A. 全部安装（一次做完，推荐）**：我一口气把 5 个模块 + 收尾全做完，只在需要你输入、扫码或点平台时才来找你。
+> - **A. 全部安装（一次做完，推荐）**：我一口气把 4 个模块 + 收尾全做完，只在需要你输入、扫码或点平台时才来找你。
 > - **B. 逐模块（默认）**：每做完一个模块我汇报一次，你说"继续"我再做下一个。
 >
 > **二、两处平台设置**，在 Muse.AI 网页上做：
@@ -129,285 +126,6 @@ curl -sS -m 8 -o /dev/null -w 'cf     %{http_code}\n' https://api.cloudflare.com
 ```
 
 期望：`whoami` 是 root 或可用 sudo 的用户；`HOME` 指向可持久化的家目录；systemd 存在；两个 HTTP 码不是 000（000 = 连不上）。若 GitHub 不通，第 8 步的离线缓存就是**必需**的，不是可选项。**探测 2 两个都是 000 时，先回头确认上面的「直接网络协议」已全部打开，再谈别的。**
-
-# 模块 A｜自动审批底座（MuseAutoApprove，步骤 1–4）
-
-先装这一模块并常驻：**后续全程出网（拉代码、装依赖、调模型）都不再卡审批卡片**。本模块要用户配合三次：定策略、发 muse.ai 账号密码、首次装包点一次卡片。
-
-## 四、步骤 1：MuseAutoApprove 是什么（先定策略）
-
-**目标**：说清机制与副作用，让用户定决策策略。
-
-> 沙盒外联未被规则覆盖的域名会弹审批卡片（HITL）。本组件用 muse.ai 账号连 hatch 网关加密 RPC（`wss://hatch.metaaivm.com`）自动决策，默认 `allow_always + destination_domain` 落库永久规则。纯 Node 无浏览器，只与 muse.ai / hatch 通信；`data/` 含账号密码、会话、token，`log/` 含邮箱与审批记录，均在 `$HOME` 下（700/600），不外发不提交。
-
-| 事项     | 说明                                                                      |
-| -------- | ------------------------------------------------------------------------- |
-| 登录     | 邮箱+密码；服务端会发一封验证码邮件，**本工具不读邮件**                   |
-| 会话     | `hatch_sess` 30 天，每 5 分钟 token touch 滚动续期——30 天内跑过一次即永续 |
-| 轮询     | 默认 10 秒一轮                                                            |
-| 默认决策 | `allow_always + destination_domain`；失败回退 `allow_once`                |
-| 保守决策 | `--decision allow_once`：只批本次，不落永久规则                           |
-| 生效范围 | 仅本账号、所连 VM 的审批流                                                |
-
-### ① 🤖 AI 执行（命令）
-
-**开工检查**：用户还没确认第三章的两处平台设置——「设置 → 权限 → 直接网络协议」全部打开、「设置 → 权限 → 连接器 → 浏览器」除「上传文件」外全部改为允许——的，先回去做完再进本步骤。
-
-```bash
-ls "$HOME/workspace/muse-guardian/MuseAutoApprove/muse-daemon.cjs" 2>/dev/null \
-  && echo "已安装（升级见第二十二章）" || echo "尚未安装"
-```
-
-确认尚未安装后，按 ② 与用户确认策略，再进下一步。用户没明确表态就不要动。
-
-### ② 💬 对用户说（可原样发送）
-
-> 🚦 装一个"自动点同意"的组件（MuseAutoApprove）。沙盒每次访问新域名，平台会弹卡片等你点"允许"，不点就卡住；这个组件用你的 muse.ai 账号把这一步自动做掉。
->
-> 要你定一个策略：
->
-> - **A. 永久允许**（推荐）：同域名批一次永久放行，之后基本不再看到卡片；
-> - **B. 每次只批一次**（保守）：域名不被永久记住。
->
-> 另外它需要你的 muse.ai 账号密码——下一步**直接在聊天框发我**即可。装的过程会弹一两次卡片（GitHub、npm），那两次请手动点允许。
-> 回"A"或"B"，我就继续。
-
-### ③ 🙋 用户手动做
-
-- 选策略 A 或 B。
-
-### ④ ✅ 做完的标志
-
-- 用户明确回复 A 或 B（没回复不要往下走）。
-
-### ⑤ 🛠️ 常见失败与处理
-
-| 现象                     | 处理                                                                 |
-| ------------------------ | -------------------------------------------------------------------- |
-| 用户担心"自动同意"不安全 | 改 B（每次只批一次）；或先不装                                       |
-| 用户不想把密码给 AI      | MAA 只能明文聊天给（其他入口走不通）；介意可落盘后自行改密，或先不装 |
-| 用户想只放行指定域名     | 本工具没有白名单：要么 B，要么继续手工点卡片                         |
-
----
-
-## 五、步骤 2：安装（Node + git clone + 依赖）
-
-**目标**：Node ≥ 20.18 就位、代码 clone 到 `~/workspace/muse-guardian`、依赖装齐、语法自检全过。
-
-> 全部装在 `$HOME` 下：代码、`node_modules`、Node 运行时、凭据、会话——重建后都在。
-
-### ① 🤖 AI 执行（命令）
-
-```bash
-# 1) Node ≥ 20.18：有就跳过；没有/过旧 → 装 $HOME/.local（重建不丢）
-command -v node && node -v || echo "no node"
-```
-
-```bash
-# 无 Node 或版本低时（示例版本，按需换 22.x 最新补丁号）：
-case "$(uname -m)" in x86_64|amd64) A=x64;; aarch64|arm64) A=arm64;; *) echo "未知架构 $(uname -m)"; exit 1;; esac
-V=v22.16.0
-mkdir -p "$HOME/.local" /tmp/ni
-curl -fL -o /tmp/ni/node.tar.gz "https://nodejs.org/dist/$V/node-$V-linux-$A.tar.gz"
-tar -xzf /tmp/ni/node.tar.gz -C "$HOME/.local" --strip-components=1 --exclude='CHANGELOG.md' --exclude='LICENSE' --exclude='README.md'
-export PATH="$HOME/.local/bin:$PATH"; node -v && npm -v
-```
-
-```bash
-# 2) 克隆仓库（更新 = git pull），app 在仓库的 MuseAutoApprove/ 子目录
-cd ~/workspace
-[ -d muse-guardian/.git ] && git -C muse-guardian pull --ff-only \
-  || git clone https://github.com/bytehola/muse-guardian.git
-ls muse-guardian/MuseAutoApprove/muse-daemon.cjs
-
-# 3) 装依赖 + 双自检
-cd muse-guardian/MuseAutoApprove
-npm install --no-audit --no-fund
-node -e "require('undici');require('ws');require('https-proxy-agent');require('sodium-native');console.log('deps OK')"
-for f in muse-daemon.cjs work/*.cjs; do node --check "$f" || echo "FAIL $f"; done; echo "语法检查完成"
-
-# 4) 目录与权限
-mkdir -p data log && chmod 700 data
-```
-
-> **首次安装的鸡生蛋**：`git clone` / `npm install` 自己也要出网，可能弹审批卡片（`github.com`、`registry.npmjs.org`、`nodejs.org`）——此时自动审批还没起来，需要用户手动点一次"允许"。点过之后，同类请求就永久放行了。
-
-**装完后读一遍 `~/workspace/muse-guardian/MuseAutoApprove/README.md`**——里面有这个工具的目录结构、CLI 命令、环境变量和日志字段说明。后续排障和回答用户追问时用得上，不要只照本 SKILL.md 的模板复述。
-
-### ② 💬 对用户说（可原样发送）
-
-> 📦 开始装。过程可能弹一两次审批卡片（GitHub、npm），**请手动点允许**——就这一次，之后同类请求自动审批组件会替你处理。
-> 装完我把自检结果给你看。
-
-### ③ 🙋 用户手动做
-
-- 平台弹卡片时手动点允许。
-
-### ④ ✅ 做完的标志
-
-```bash
-cd ~/workspace/muse-guardian/MuseAutoApprove
-node -v                                                                   # ≥ v20.18
-ls muse-daemon.cjs package.json work/*.cjs | wc -l                        # 期望 9
-node -e "require('undici');require('ws');require('https-proxy-agent');require('sodium-native');console.log('deps OK')"
-for f in muse-daemon.cjs work/*.cjs; do node --check "$f" || echo "FAIL $f"; done; echo "语法检查完成"
-```
-
-### ⑤ 🛠️ 常见失败与处理
-
-| 现象                       | 处理                                                                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `git clone` 超时/被拦      | 让用户放行 `github.com`；或本机打包 `MuseAutoApprove/` 整目录传进沙盒（走整包拷贝，别手抄单文件）                        |
-| `npm install` 超时/被拦    | 放行 `registry.npmjs.org`；或换镜像 `npm config set registry https://registry.npmmirror.com`；或用离线 `node_modules` 包 |
-| `sodium-native` 编译失败   | `apt-get install -y build-essential python3` 后重装；或用同架构的离线 `node_modules`                                     |
-| `node --check` 某文件 FAIL | 文件截断/损坏：`git -C ~/workspace/muse-guardian checkout -- MuseAutoApprove/<file>`                                     |
-| bash 报 `$'\r'`            | 从文档复制时带上了 CRLF：`sed -i 's/\r$//' <文件>`                                                                       |
-
----
-
-## 六、步骤 3：凭据与自动登录
-
-**目标**：凭据落盘（文件方式，长期必须）、验证登录链路。
-
-> **凭据查找顺序**：环境变量 `MUSE_USER`/`MUSE_PASSWORD` > 文件 `data/credentials.json`。
-> **长期运行必须用文件**：cron、重建恢复拉起的进程读不到 shell 环境变量。**"会话过期后能否自动重登"完全取决于这个文件**。
-> **登录流程**：restart → send-otp（服务端会发一封验证码邮件，**工具不读它**）→ confirm-password（密码信封）→ `hatch_sess` 30 天。
-> **会话永续**：守护进程每 5 分钟 token touch 滚动续期——30 天内跑过一次就永续。
-> **自愈**：会话丢失/过期 → 下次连接自动重登（日志 `connect_retry ENOENT` → `auto_login_ok` 是正常路径）。
-
-### ① 🤖 AI 执行（命令）
-
-**唯一方式：用户把账号密码直接发在聊天框，AI 落盘（不复述、不回显）**
-
-> MAA 的 muse.ai 账号是纯密码登录，沙盒里没有可用的安全入口——用户自己写文件、或走别的"安全"通道实测都走不通。**用户直接把邮箱和密码发在聊天框里，这是唯一可行的给法。**
-
-```bash
-APP=~/workspace/muse-guardian/MuseAutoApprove; cd "$APP"
-mkdir -p data && chmod 700 data
-# 账号密码来自用户聊天框里的明文；值只经环境变量传入，不进 shell 历史、不写命令行参数
-MUSE_EM="<用户在聊天框给的邮箱>" MUSE_PW="<用户在聊天框给的密码>" node -e '
-  require("fs").writeFileSync("data/credentials.json",
-    JSON.stringify({email:process.env.MUSE_EM,password:process.env.MUSE_PW},null,2),{mode:0o600});
-  console.log("written");
-'
-chmod 600 data/credentials.json
-```
-
-> ⚠️ 落盘后**不要**复述、不 echo、不写进任何文档；密码只存在于 `data/credentials.json`（600）。用户介意聊天记录的话，可自行改一次 muse.ai 密码并更新这个文件。
-
-**验证（两步）**：
-
-```bash
-cd "$APP"
-node muse-daemon.cjs --check       # 离线体检：凭据来源 + 会话状态（不出网）
-node muse-daemon.cjs --smoke       # 真登录一次：会发一封验证码邮件（无需读码）→ SMOKE OK
-```
-
-### ② 💬 对用户说（可原样发送）
-
-> 🔑 需要你的 muse.ai 账号密码——**直接在聊天框里发我就行**（邮箱 + 密码，一条消息发来即可）。
->
-> 说明：MAA 登录是纯密码，沙盒里没有别的可用入口，**明文聊天是唯一走得通的给法**。我会把它写进沙盒里 600 权限的凭据文件，之后不回显、不复述、不写进任何文档。你要是介意，落盘后可以自行改一次 muse.ai 密码。
->
-> 另外两点：登录时 muse.ai 会往你邮箱**发一封验证码邮件，不用读**（流程必需，工具不读码）；会话 30 天滚动续期，**只要 30 天内跑过一次就永续**，平时不用重复登录。
-
-### ③ 🙋 用户手动做
-
-- 在聊天框里直接把 muse.ai 邮箱和密码发给我。
-
-### ④ ✅ 做完的标志
-
-```bash
-cd ~/workspace/muse-guardian/MuseAutoApprove
-node muse-daemon.cjs --check; echo "rc=$?"     # 期望：凭据 OK（来源 data/credentials.json），rc=0
-node muse-daemon.cjs --smoke; echo "rc=$?"     # 期望 0 + SMOKE OK
-stat -c '%a %n' data data/credentials.json     # 期望 700 / 600
-```
-
-### ⑤ 🛠️ 常见失败与处理
-
-| 现象                                           | 处理                                                                       |
-| ---------------------------------------------- | -------------------------------------------------------------------------- |
-| `凭据: 缺失 (无环境变量且无 credentials.json)` | 路径/文件名核对（不是 `.example`）；用 `node -e 'JSON.parse(...)'` 验 JSON |
-| `来源: 环境变量+文件混合（可能不完整）`        | 只留一处完整的                                                             |
-| `--smoke` 在 `confirm-password` 失败           | 密码错或账号有额外验证（见"已知边界"）；让用户浏览器登录确认账号可用       |
-| `token 403`                                    | cookie 陈旧：删 `data/cookies.json` 重跑 `--smoke`；或出网没放行 `muse.ai` |
-| `sodium-native 未安装`                         | 回步骤 2 装依赖                                                            |
-| 权限不是 600/700                               | `chmod 700 data && chmod 600 data/credentials.json`                        |
-
----
-
-## 七、步骤 4：启动、停止
-
-**目标**：从演练到常驻，掌握停止/重启。
-
-> **顺序**：`--smoke`（真登录）→ `--once --dry`（连网关、只看不批）→ `--once`（真批一轮）→ 常驻（nohup）。
-> **默认参数**：不带参数就是 10 秒轮询 + `allow_always` + 失败回退 `allow_once`。策略 B 用 `--decision allow_once`。
-> **停止**：优雅停 `touch data/muse-daemon.stop`（≤10 秒退出，**保活不会拉起它**——维护模式）；前台 Ctrl+C；强杀 `kill "$(cat data/muse-daemon.pid)"`。
-> **防重复**：已在跑时再启动会打印 `another muse-daemon is already running: pid X -> exit` 并退出 0（设计，不是故障）。
-
-### ① 🤖 AI 执行（命令）
-
-```bash
-APP=~/workspace/muse-guardian/MuseAutoApprove; cd "$APP"
-export PATH="$HOME/.local/bin:$PATH"
-
-# 1) 演练：连网关、拉列表、只看不批
-node muse-daemon.cjs --once --dry; echo "rc=$?"
-tail -n 10 log/daemon-log.ndjson
-
-# 2) 常驻（后台）
-mkdir -p log
-nohup node muse-daemon.cjs --loop 10000 --always --fallback-once >> log/muse-console.log 2>&1 &
-echo "pid=$!"; sleep 8
-pgrep -f "[m]use-daemon.cjs" >/dev/null && echo "在跑"
-tail -n 5 log/daemon-log.ndjson
-```
-
-期望日志依次出现 `daemon_start`（含 decision/scope/proxy）→ `connected` → `heartbeat`（每 10 秒一条，`pending` 为当前待批数）。`pending:0` 是常态，不是失败。
-
-**日常操作**：
-
-```bash
-pgrep -f "[m]use-daemon.cjs"                       # 查进程
-tail -f log/daemon-log.ndjson                      # 实时日志
-touch data/muse-daemon.stop                        # 优雅停（维护模式）
-rm data/muse-daemon.stop                           # 恢复
-kill "$(cat data/muse-daemon.pid)"                 # 强停（接入保活后 1 分钟内拉回）
-cd "$APP" && node work/muse-rpc.cjs list           # 审批列表
-node work/muse-rpc.cjs detail '<id>'               # 单条详情
-```
-
-### ② 💬 对用户说（可原样发送）
-
-> ▶️ 启动分两步：先真登录验证一次（邮箱会收到一封验证码邮件，**不用管**），再做一次"只看不批"的演练；都过了我才挂后台。
-> 之后想停就跟我说（我放停止标记，保活也不会拉起它）。
-
-### ③ 🙋 用户手动做
-
-- 无。
-
-### ④ ✅ 做完的标志
-
-```bash
-cd ~/workspace/muse-guardian/MuseAutoApprove
-pgrep -f "[m]use-daemon.cjs" >/dev/null && echo "在跑"
-tail -n 20 log/daemon-log.ndjson        # 期望 daemon_start → connected → heartbeat
-```
-
-### ⑤ 🛠️ 常见失败与处理
-
-| 现象                                                               | 处理                                                                |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| `connect_retry ... ENOENT ... cookies.json` 后紧跟 `auto_login_ok` | 正常自愈（首次无会话），不用管                                      |
-| `token 403` 反复                                                   | 出网没放行 `muse.ai`，或 cookie 陈旧（删 `data/cookies.json` 重登） |
-| `fetch failed` / 连不上                                            | 出网没放行或网络不通；需代理才设 `MUSE_PROXY`（默认直连）           |
-| 退出码 2 + 中文提示                                                | 无凭据无会话，回步骤 3                                              |
-| `another muse-daemon is already running`                           | 已有实例（pid 守卫）；重启先停                                      |
-| `DAEMON FATAL`                                                     | 看 console 日志里的具体错误；依赖缺失回步骤 2                       |
-| 启动后没有 heartbeat                                               | 看进程在不在；不在就回上一行                                        |
-
----
 
 # 模块 B｜监控与探针（CF 后台 + cf-probe，步骤 5–6）
 
@@ -936,7 +654,7 @@ export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:
 log() { echo "[$(date '+%F %T')] $*" >> "$LOG"; }
 
 # --- 日志裁剪：任何日志文件超过 10MB，只保留末尾 10MB ---
-# 覆盖本体系所有日志：脚本日志、MAA 日志、Hermes 网关日志、hook 探针日志。
+# 覆盖本体系所有日志：脚本日志、Hermes 网关日志、hook 探针日志。
 # 用 tail -c 取字节并 sed 丢掉首行（避免留下半行）。
 trim_log_file() {
   local f="$1" sz tmp
@@ -1102,8 +820,6 @@ fi
 # --- 4. 日志裁剪：把所有日志压回 10MB 以内 ---
 for f in "$LOG" \
          "$HOME/.hermes/logs/weixin-gateway.log" \
-         "$HOME/workspace/muse-guardian/MuseAutoApprove"/log/*.ndjson \
-         "$HOME/workspace/muse-guardian/MuseAutoApprove"/log/muse-console.log \
          "$HOME/hooks/logs"/*.jsonl \
          "$SETUP_DIR/logs"/*.log; do
   trim_log_file "$f"
@@ -2103,9 +1819,9 @@ if __name__ == "__main__":
 
 ---
 
-# 模块 E｜三层保活接入（Layer 1/2a/2b + MAA 保活，步骤 11–15）
+# 模块 E｜三层保活接入（Layer 1/2a/2b，步骤 11–14）
 
-把前面装好的东西接进三层托管：沙盒内看门狗、平台 hook 探针、平台开机钩子，并给 MuseAutoApprove 打上保活补丁。**用户介入**：在平台端点 3 项授权（保活探针 hook、开机钩子、root 执行）。
+把前面装好的东西接进三层托管：沙盒内看门狗、平台 hook 探针、平台开机钩子。**用户介入**：在平台端点 3 项授权（保活探针 hook、开机钩子、root 执行）。
 
 ## 十四、步骤 11：Layer 1 — 沙盒内看门狗（写入 cron）
 
@@ -2527,411 +2243,9 @@ exec "$RESTORE"
 
 ---
 
-## 十八、步骤 15：保活（接进三层托管）
+# 收尾｜验收与运维（步骤 20）
 
-**目标**：守护进程挂掉后 1 分钟内被看门狗拉起；沙盒重建后由恢复流程自动拉回。
-
-> 守护进程自身有会话自愈（掉线重连、会话失效自动重登），**保活补丁只管一件事：进程不在就拉起**。接进两条既有通道：
->
-> 1. **Layer 1**：`watchdog.sh`（每分钟 cron）追加巡检段；
-> 2. **Layer 3**：`restore-all.sh`（重建恢复）追加启动段——开机钩子 `init.sh` 执行的就是 restore-all，所以**不用改 init.sh**。
->
-> 两段都幂等：进程在就不动手；`data/muse-daemon.stop` 存在就跳过（维护模式）；`data/LOGIN_BLOCKED` 存在就跳过（自动登录熔断，避免循环发验证码）。
-
-### ① 🤖 AI 执行（命令）
-
-**补丁 A：watchdog.sh**——在 `log "巡检完成"` 那一行**之前**插入（即接在基础脚本的 `# --- 4. 日志裁剪` 段之后）：
-
-```bash
-# --- 5. MuseAutoApprove（muse.ai 外联审批自动批准）---
-# 策略：默认 A（永久允许）；用户选了 B 就把 --always --fallback-once 换成 --decision allow_once
-MUSE_APP="$HOME/workspace/muse-guardian/MuseAutoApprove"
-MUSE_DLOG="$MUSE_APP/log/daemon-log.ndjson"
-if [ -f "$MUSE_APP/muse-daemon.cjs" ] && [ ! -e "$MUSE_APP/data/muse-daemon.stop" ] && [ ! -e "$MUSE_APP/data/LOGIN_BLOCKED" ]; then
-  if pgrep -f "[m]use-daemon.cjs" >/dev/null 2>&1; then
-    # 可选加固：进程在但日志 15 分钟没动 → 判卡死，杀掉让下一轮重启
-    last_ts="$(tail -n 5 "$MUSE_DLOG" 2>/dev/null | grep -o '"ts":[0-9]*' | tail -1 | cut -d: -f2)"
-    if [ -n "$last_ts" ] && [ "$(( $(date +%s) * 1000 - last_ts ))" -gt 900000 ]; then
-      pid="$(cat "$MUSE_APP/data/muse-daemon.pid" 2>/dev/null || true)"
-      if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "[m]use-daemon.cjs"; then
-        kill -TERM "$pid" 2>/dev/null || true
-        log "MuseAutoApprove 日志停滞 15 分钟，已 TERM pid=$pid（下一轮重启）"
-      fi
-    fi
-  else
-    # 预检：无凭据且无有效会话时不白试（--check 0=可启动 / 2=不可）
-    if (cd "$MUSE_APP" && node muse-daemon.cjs --check >/dev/null 2>&1); then
-      mkdir -p "$MUSE_APP/log"
-      (cd "$MUSE_APP" && nohup node muse-daemon.cjs --loop 10000 --always --fallback-once >> log/muse-console.log 2>&1 &)
-      sleep 3
-      if pgrep -f "[m]use-daemon.cjs" >/dev/null 2>&1; then log "MuseAutoApprove 拉起成功"; else log "MuseAutoApprove 拉起失败（看 $MUSE_APP/log/muse-console.log）"; fi
-    else
-      log "MuseAutoApprove 预检未过（缺凭据且无有效会话），跳过"
-    fi
-  fi
-fi
-```
-
-插入与校验：
-
-```bash
-F=~/workspace/setup/watchdog.sh
-grep -q "MuseAutoApprove" "$F" && echo "补丁已在" || echo "未打补丁（按上面补丁 A 插入）"
-bash -n "$F" && echo "语法 OK"
-bash "$F"; echo "rc=$?"                    # 手动跑一次看门狗
-tail -n 5 ~/workspace/setup/logs/watchdog.log
-```
-
-**补丁 B：restore-all.sh**——在 `# --- 3. cf-probe 探针` 段之后、`# --- 4. cron 定时任务` 之前插入：
-
-```bash
-# --- 3b. MuseAutoApprove（重建后自动拉起）---
-MUSE_APP="$HOME/workspace/muse-guardian/MuseAutoApprove"
-if [ -f "$MUSE_APP/muse-daemon.cjs" ]; then
-  export PATH="$HOME/.local/bin:$PATH"
-  if ! command -v node >/dev/null 2>&1; then
-    log "WARN: node 不可用，MuseAutoApprove 无法启动。装好 Node 后看门狗会自动拉起。"
-  else
-    if ! (cd "$MUSE_APP" && node -e 'require("undici");require("ws");require("https-proxy-agent");require("sodium-native")' >/dev/null 2>&1); then
-      if [ -f "$HOME/workspace/setup/muse-node_modules.tar.gz" ]; then
-        log "解包离线依赖（muse-node_modules.tar.gz）"
-        tar -xzf "$HOME/workspace/setup/muse-node_modules.tar.gz" -C "$MUSE_APP" >>"$LOG" 2>&1 \
-          || log "WARN: 离线依赖解包失败"
-      else
-        log "尝试 npm install（无网时会失败）"
-        (cd "$MUSE_APP" && npm install --no-audit --no-fund >>"$LOG" 2>&1) || log "WARN: npm install 失败"
-      fi
-    fi
-    if [ ! -e "$MUSE_APP/data/muse-daemon.stop" ] && [ ! -e "$MUSE_APP/data/LOGIN_BLOCKED" ] && ! pgrep -f "[m]use-daemon.cjs" >/dev/null 2>&1; then
-      mkdir -p "$MUSE_APP/log"
-      (cd "$MUSE_APP" && nohup node muse-daemon.cjs --loop 10000 --always --fallback-once >> log/muse-console.log 2>&1 &)
-      sleep 3
-      pgrep -f "[m]use-daemon.cjs" >/dev/null 2>&1 && log "MuseAutoApprove 已启动" || log "WARN: MuseAutoApprove 启动失败"
-    else
-      log "MuseAutoApprove 已在运行、处于维护模式或登录熔断，跳过"
-    fi
-  fi
-else
-  log "未安装 MuseAutoApprove，跳过"
-fi
-```
-
-```bash
-F=~/workspace/setup/restore-all.sh
-grep -q "3b. MuseAutoApprove" "$F" && echo "补丁已在" || echo "未打补丁（按上面补丁 B 插入）"
-bash -n "$F" && echo "语法 OK"
-```
-
-**保活语义（前四条实测过或按 Linux 语义成立）**：
-
-1. 进程在 → 静默跳过。
-2. 进程不在 + 预检过 → 拉起，3 秒后确认，失败记日志。
-3. 维护模式（stop 标记）→ 跳过，**不会跟用户抢**。
-4. 进程在但日志 15 分钟没动 → 判卡死，TERM 让下一轮重启（可选加固，补丁 A 里已含）。
-5. 登录熔断（`data/LOGIN_BLOCKED`）→ 不拉起，和 stop 标记一样是文件在就跳过。人工确认账号正常后，删除该标记和 `data/login-attempts.json`。
-
-**注意**：restore-all 跑完最后会执行一次 watchdog，所以补丁 B 不用单独调 watchdog。开机钩子（init.sh）执行 restore-all，同理覆盖。
-
-**演练**（必做）：
-
-```bash
-kill "$(cat ~/workspace/muse-guardian/MuseAutoApprove/data/muse-daemon.pid)" 2>/dev/null
-sleep 70; pgrep -f "[m]use-daemon.cjs" >/dev/null && echo "看门狗已拉回" || echo "没拉回：看 watchdog.log"
-```
-
-### ② 💬 对用户说（可原样发送）
-
-> ♻️ 自动审批接进你已有的保活了：**挂了 1 分钟内自动拉回**，沙盒重建后恢复脚本会把它带回来。
-> 有一个例外：如果放的是"停止标记"（维护模式），保活不会拉起它——这是故意的，否则你想停停不掉。
-> 我会做一次"杀掉→自动拉回"的实测。
-
-### ③ 🙋 用户手动做
-
-- 无。
-
-### ④ ✅ 做完的标志
-
-```bash
-grep -c MuseAutoApprove ~/workspace/setup/watchdog.sh          # ≥1
-grep -c "3b. MuseAutoApprove" ~/workspace/setup/restore-all.sh # 1
-tail -n 10 ~/workspace/setup/logs/watchdog.log                 # 能看到巡检记录
-pgrep -f "[m]use-daemon.cjs" >/dev/null && echo "守护在跑"
-```
-
-### ⑤ 🛠️ 常见失败与处理
-
-| 现象                     | 处理                                                                    |
-| ------------------------ | ----------------------------------------------------------------------- |
-| 杀掉后没被拉回           | `crontab -l \| grep watchdog` 确认看门狗在跑；检查 stop 标记是否忘了删  |
-| 拉起失败                 | 看 `log/muse-console.log`；通常是凭据错（`auto_login_error`）或依赖缺失 |
-| 反复重启                 | 同上；多为凭据失效，改密后要更新 `data/credentials.json`                |
-| 重建后 `node: not found` | Node 装在系统目录了；按步骤 2 装 `$HOME/.local`（重建保留）             |
-| 看门狗误杀自己的进程     | 确认用的是 `[m]use-daemon.cjs` 括号模式                                 |
-
-**MAA 的持久化要点**（与步骤 7 的「什么保留 / 什么会丢」是同一套规则，这里只列 MAA 自己的）：
-
-- **重建保留**：`~/workspace/muse-guardian/`（代码 + `.git` + `node_modules`）、`data/credentials.json`（凭据）、`data/cookies.json`（会话，30 天滚动）、`data/muse-config.json` 与 `token-last.json`、`log/`、`~/.local/`（Node）。
-- **重建会丢**：守护进程（内存）→ 由补丁 B 的 3b 段自动拉回。
-- **账户密码变更**：换了 muse.ai 密码要更新 `data/credentials.json` 并清会话重登。
-- **想彻底重置登录**：删 `data/cookies.json`（可留 `muse-config.json`）→ 重跑 `--smoke`。
-- **日志体积**：所有日志由看门狗每分钟裁剪一次，任何文件超过 **10MB** 就只保留末尾 10MB（无需人工干预）。手动兜底：
-
-```bash
-cd ~/workspace/muse-guardian/MuseAutoApprove
-for f in log/*.ndjson log/*.log; do [ -f "$f" ] && tail -c $((10 * 1024 * 1024)) "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
-```
-
----
-
-# 收尾｜验收、排障与运维（步骤 16–20）
-
-MuseAutoApprove 的验证、故障排查、与用户的交互纪律、升级卸载，最后跑一遍端到端验证与重建演练。**用户介入**：微信发消息测试、决定是否做重建演练。
-
-## 十九、步骤 16：验证是否可用
-
-**目标**：从"能加载"验到"真的替你批了单、且挂了能自愈"。
-
-> **四层验证**：静态 → 本地体检 → 登录链路 → 真实审批（核心）。每层都有判据，全绿才算可用；韧性见步骤 15。
-> **怎么制造一次真实审批**：让沙盒访问一个**没被永久放行过**的域名（如 `https://example.org`）。它会被平台拦下弹单，守护进程 10 秒内批准并落库永久规则。
-
-### ① 🤖 AI 执行（命令）
-
-```bash
-APP=~/workspace/muse-guardian/MuseAutoApprove; cd "$APP"; export PATH="$HOME/.local/bin:$PATH"
-
-echo "=== 1. 静态 ==="
-for f in muse-daemon.cjs work/*.cjs; do node --check "$f" >/dev/null || echo "FAIL $f"; done; echo "语法检查完成"
-node -e "require('undici');require('ws');require('https-proxy-agent');require('sodium-native');console.log('deps OK')"
-
-echo "=== 2. 本地体检（不出网）==="
-node muse-daemon.cjs --check; echo "rc=$?（期望 0）"
-
-echo "=== 3. 登录链路（会发 1 封邮件）==="
-node muse-daemon.cjs --smoke; echo "rc=$?（期望 0 + SMOKE OK）"
-
-echo "=== 4. 连接与轮询 ==="
-timeout 90 node muse-daemon.cjs --once --dry; echo "rc=$?（期望 0）"
-tail -n 5 log/daemon-log.ndjson        # 期望 connected + heartbeat
-
-echo "=== 5. 真实审批（核心）==="
-curl -sS -m 8 -o /dev/null -w 'first  HTTP %{http_code}\n' https://example.org || echo "被拦（正常：等批准）"
-sleep 12
-grep -E '"event":"(pending_found|decided|decided_fallback|decide_error)"' log/auto-approve-log.ndjson | tail -5
-curl -sS -m 8 -o /dev/null -w 'second HTTP %{http_code}\n' https://example.org   # 同域名第二次：不应再有新单
-
-```
-
-**判据（全绿才算可用）**：
-
-| #   | 项       | 期望                                            |
-| --- | -------- | ----------------------------------------------- |
-| 1   | 静态     | 语法全过 + `deps OK`                            |
-| 2   | 体检     | rc=0，凭据/会话 OK                              |
-| 3   | 登录     | rc=0 + `SMOKE OK`                               |
-| 4   | 连接     | rc=0，日志有 `connected` + `heartbeat`          |
-| 5   | 真实审批 | `pending_found` → `decided`；同域名第二次无新单 |
-
-> **韧性**（杀掉后能否自动拉回）在步骤 15「保活」里已经实测过，这里不再重复跑（省 70 秒）。
-
-### ② 💬 对用户说（可原样发送）
-
-> ✅ 验收四步：本地检查 → 真登录（邮箱会收到一封验证码邮件，**不用管**）→ 连网关拉列表 → **真实外联测试**：我让沙盒访问一个新网站，你在平台上看是不是不再弹卡片（或一闪而过），然后我再访问一次同一个网站——应该直接通过。
-> 结果我逐条报给你。若卡片一直挂着没人批，你点一次"允许"并告诉我，我查日志。
-
-### ③ 🙋 用户手动做
-
-- 观察平台 UI：第 5 步测试时卡片是否消失/一闪而过；反馈结果。
-
-### ④ ✅ 做完的标志
-
-```bash
-APP=~/workspace/muse-guardian/MuseAutoApprove; cd "$APP"
-node muse-daemon.cjs --check | tail -2
-grep -c '"event":"decided"' log/daemon-log.ndjson                 # ≥1
-grep -E '"event":"(pending_found|decided)"' log/auto-approve-log.ndjson | tail -5
-pgrep -f "[m]use-daemon.cjs" >/dev/null && echo "守护在跑"
-```
-
-### ⑤ 🛠️ 常见失败与处理
-
-| 现象                                           | 处理                                                            |
-| ---------------------------------------------- | --------------------------------------------------------------- |
-| `--smoke` 失败在 `confirm-password`            | 密码错或账号有额外验证（见"已知边界"）；核对密码后重试          |
-| `--once --dry` 报 `token 403` / `fetch failed` | 出网没放行 `muse.ai`；需代理才设 `MUSE_PROXY`                   |
-| 没有 `pending_found`                           | 测试域名已被放行过（换新域名）；或守护没在跑                    |
-| 有 `pending_found` 没 `decided`                | 看 `decide_error`；保守用 `--decision allow_once` 定位          |
-| 同域名第二次还弹单                             | `decided` 里 `applied_rules` 为 0：scope 未被接受，看"已知边界" |
-
----
-
-## 二十、步骤 17：故障排查（按症状查表）
-
-**目标**：出问题 5 分钟内定位。
-
-> 排查顺序：**先看日志**（`daemon-log.ndjson` 主日志 / `muse-console.log` 后台输出 / `auto-approve-log.ndjson` 决策）→ 再看进程（`pgrep`）→ 最后看网络与凭据。别一上来就重启（会把现场清掉）。
-
-### ① 🤖 AI 执行（命令）
-
-```bash
-APP=~/workspace/muse-guardian/MuseAutoApprove
-pgrep -fa "[m]use-daemon.cjs" || echo "没在跑"
-tail -n 20 "$APP/log/daemon-log.ndjson"
-tail -n 20 "$APP/log/muse-console.log" 2>/dev/null
-tail -n 5  "$APP/log/auto-approve-log.ndjson" 2>/dev/null
-(cd "$APP" && node muse-daemon.cjs --check)
-ls -l "$APP/data/muse-daemon.stop" 2>/dev/null && echo "处于维护模式"
-```
-
-### ② 💬 对用户说（可原样发送）
-
-> 🩺 出问题我来查，你只要告诉我现象（"卡片又弹了""它没在跑"之类），我给根因和修复动作，不需要你敲命令。
-
-### ③ 🙋 用户手动做
-
-- 描述现象；按要求放行域名或确认卡片。
-
-### ④ ✅ 做完的标志
-
-- 症状定位到下表某行，处理后复测通过。
-
-### ⑤ 🛠️ 常见失败与处理
-
-| 症状                                             | 原因                              | 处理                                                     |
-| ------------------------------------------------ | --------------------------------- | -------------------------------------------------------- |
-| `token 403`（连续）                              | 出网没放行 / cookie 陈旧          | 平台放行 `muse.ai`；删 `data/cookies.json` 重登          |
-| `fetch failed` / `ENOTFOUND` / `ECONNREFUSED`    | 完全连不上                        | 确认 `muse.ai` 可达；需代理才设 `MUSE_PROXY`（默认直连） |
-| `ENOENT ... cookies.json` 后紧跟 `auto_login_ok` | 正常自愈                          | 不用管                                                   |
-| `auto_login_error`（连续）                       | 凭据错/改密/二步验证              | 核对 `data/credentials.json`；二步验证不受支持           |
-| `sodium-native 未安装` / ABI 错误                | 依赖缺失或跨架构搬了 node_modules | 目标机重装依赖                                           |
-| `decide_error` 持续                              | 服务端拒绝决策                    | 看错误 message；保守用 `--decision allow_once`           |
-| 日志 >15 分钟没动                                | 进程僵死                          | 看门狗会 TERM 并重启；也可手动 kill                      |
-| 磁盘被日志占满                                   | 看门狗裁剪未生效（cron 没跑 / 看门狗挂了） | 确认看门狗在跑；手动：`tail -c $((10*1024*1024)) log/daemon-log.ndjson > t && mv t log/daemon-log.ndjson` |
-
-## 二十一、步骤 18：跟用户的交互（话术与纪律）
-
-**目标**：固定协作套路：**问策略、收凭据、报安装、报验证**各在其步骤完成，本步只统一定「状态通知」话术与四条纪律。健康时静默，只在需要用户动作时开口。
-
-> 与第二章规则 1 一致：按开工选定的 A（全部安装）/ B（逐模块）模式推进，**不在步骤之间逐个问"继续"**；只有用户必须输入、扫码或平台点击时才开口。
-> 每次打断都要有明确诉求（要什么、给到哪、给了之后我做什么），不要让用户猜。
-
-> 四条纪律：
->
-> 1. **不猜策略**：装之前必须让用户选"永久允许 / 每次只批一次"。
-> 2. **凭据给法**：MAA 的 muse.ai 账号密码按用户要求走**聊天框明文**（其他入口走不通）；收到后落盘 600、不回显、不复述。其他密钥（CF Token、模型 Key）仍优先让用户自己生成或走安全页面。
-> 3. **不报假成功**：验证要有日志证据（`decided`、`auto_login_ok`）；"进程在跑"不算数。
-> 4. **不擅自扩大范围**：不推荐 `deny_always`（会让沙盒对外请求全失败）；改策略先问用户。
-
-### ① 🤖 AI 执行（命令）
-
-状态汇总一条命令（用于对用户汇报）：
-
-```bash
-APP=~/workspace/muse-guardian/MuseAutoApprove
-{ echo "安装: $([ -f "$APP/muse-daemon.cjs" ] && echo 是 || echo 否)"
-  echo "守护进程: $(pgrep -f '[m]use-daemon.cjs' >/dev/null && echo 在跑 || echo 未运行)"
-  echo "维护模式: $([ -e "$APP/data/muse-daemon.stop" ] && echo 是 || echo 否)"
-  echo "累计批准: $(grep -c '"event":"decided"' "$APP/log/daemon-log.ndjson" 2>/dev/null || echo 0) 条"
-} | sed 's/^/  /'
-```
-
-### ② 💬 对用户说（可原样发送）
-
-> 开场问策略 / 收凭据的话术**已在步骤 1、3 发过，不在这里重复**；本步 ② 只固定下面几种「状态通知」，在对应时机发：
-
-**首次批准成功（可选通知）**：
-
-> 第一个新域名已自动放行，以后不再弹卡片。
-
-**失败通知（必须说，附下一步）**：
-
-> 自动审批连续失败，原因大概率是凭据失效（改密）或出网被拦。已停止自动重试，避免反复触发验证码邮件。处理方式：<具体动作>，弄好告诉我。
-
-**停用**：
-
-> 已停（维护模式）。审批卡片会恢复成"需要你手点"。想恢复随时说。
-
-### ③ 🙋 用户手动做
-
-- 按场景回复：确认策略 / 提供凭据 / 观察卡片 / 说停或恢复。
-
-### ④ ✅ 做完的标志
-
-- 状态通知在对应时机发出（首次批准成功 / 连续失败 / 停用）；用户知道怎么停。
-
-### ⑤ 🛠️ 常见失败与处理
-
-| 现象                                | 处理                                                                   |
-| ----------------------------------- | ---------------------------------------------------------------------- |
-| 用户反问"会不会放行危险域名"        | 复述：只对本账号审批流生效、放行范围就是被批的域名、不放心就选保守策略 |
-| 用户把密码发在聊天里                | 这正是预期路径：落盘 600、不复述；提醒可事后自行改密                   |
-| 用户说"卡片还在弹"                  | 按步骤 17 症状表排查，别直接说"应该好了"                               |
-| 用户误以为 `deny_always` 是安全开关 | 说明那会让沙盒对外请求全部失败                                         |
-
----
-
-## 二十二、步骤 19：升级与卸载
-
-**目标**：升级不丢配置；下线能清干净。
-
-> 代码与数据分离：`work/` 是代码，`data/` 与 `log/` 是数据。升级只动代码，**不会让你重新登录、不丢决策记录**。
-
-### ① 🤖 AI 执行（命令）
-
-**升级（保留 data/ 与 log/）**：
-
-```bash
-APP=~/workspace/muse-guardian/MuseAutoApprove
-touch "$APP/data/muse-daemon.stop" && sleep 12          # 优雅停
-pgrep -f "[m]use-daemon.cjs" >/dev/null && echo "还在跑，再等" || echo "已停"
-git -C ~/workspace/muse-guardian pull --ff-only
-cd "$APP" && npm install --no-audit --no-fund
-node -e "require('undici');require('ws');require('https-proxy-agent');require('sodium-native');console.log('deps OK')"
-for f in muse-daemon.cjs work/*.cjs; do node --check "$f" || echo "FAIL $f"; done; echo "语法检查完成"
-tar -czf ~/workspace/setup/muse-node_modules.tar.gz -C "$APP" node_modules   # 刷新离线兜底
-rm -f "$APP/data/muse-daemon.stop"
-# 恢复：等看门狗 1 分钟内拉起，或手动 nohup 启动
-```
-
-**卸载（分两档，删 data/ 前必须二次确认）**：
-
-```bash
-# 临时停（可逆）
-touch "$APP/data/muse-daemon.stop" && sleep 12
-# 彻底卸载（⚠️ 删 data/ 会丢凭据与会话）
-pgrep -f "[m]use-daemon.cjs" >/dev/null && kill "$(cat "$APP/data/muse-daemon.pid")" 2>/dev/null || true
-rm -rf "$APP/data" "$APP/log"
-# 代码目录按用户意愿删；并把 watchdog/restore-all 里的补丁段摘掉
-```
-
-### ② 💬 对用户说（可原样发送）
-
-> ⬆️ **升级**：我先停它、拉新代码、装依赖、自检、再启动。**账号配置和登录会话不受影响，不用重新登录**。
-> 🗑️ **卸载**：分"临时停"和"彻底删（含账号配置）"两档，后者我需要你二次确认。
-
-### ③ 🙋 用户手动做
-
-- 升级：无。卸载：选档并二次确认。
-
-### ④ ✅ 做完的标志
-
-```bash
-APP=~/workspace/muse-guardian/MuseAutoApprove
-git -C ~/workspace/muse-guardian log --oneline -1
-(cd "$APP" && node muse-daemon.cjs --check); echo "rc=$?"
-pgrep -f "[m]use-daemon.cjs" >/dev/null && echo "新版在跑"
-# 卸载后
-ls -d "$APP/data" 2>/dev/null || echo "data/ 已删除"
-```
-
-### ⑤ 🛠️ 常见失败与处理
-
-| 现象                       | 处理                                                                              |
-| -------------------------- | --------------------------------------------------------------------------------- |
-| `git pull` 报本地改动冲突  | `git status` 看改了什么；重要就 `git stash`，否则 `git checkout -- <file>` 后重试 |
-| 升级后起不来               | Node 版本 / 依赖变化：`node -v`、`deps OK` 复查                                   |
-| 升级后要重新登录           | `data/` 被误删（如 `git clean -xdf`）：重新配凭据                                 |
-| 卸载后看门狗一直报拉起失败 | 补丁里的存在性判断坏了：确认 `[ -f ... ] \| 跳过` 那行在 |
-| 卸载后忘了清离线包         | 可留（重建有用）；要清：`rm -f ~/workspace/setup/muse-*.tar.gz`                   |
+最后跑一遍端到端验证与重建演练。**用户介入**：微信发消息测试、决定是否做重建演练。
 
 ## 二十三、步骤 20：最终验证清单 + 端到端重建演练
 
@@ -2970,9 +2284,6 @@ ls -l ~/workspace/setup/cf-probe-linux-amd64
 echo "=== 8. 备份 ==="
 cat ~/workspace/backups/hermes-home/.last-success 2>/dev/null || echo "还没做过备份（跑一次 backup-hermes.sh）"
 
-echo "=== 9. MuseAutoApprove（外联审批自动批准） ==="
-pgrep -f "[m]use-daemon.cjs" >/dev/null && echo "守护进程在跑" || echo "未运行（按第 17 步的验收表排查）"
-tail -n 3 ~/workspace/muse-guardian/MuseAutoApprove/log/auto-approve-log.ndjson 2>/dev/null || echo "（还没有决策记录，让沙盒访问一个新域名试一次）"
 ```
 
 **备份一次**（把当前来之不易的配置固定下来）：
@@ -2997,7 +2308,7 @@ du -sh ~/workspace/backups/hermes-home
 
 ### ④ ✅ 做完的标志
 
-- 9 项检查全部符合期望（尤其 `health-check.sh` 退出码 0、微信有回复、MuseAutoApprove 守护进程在跑）。
+- 8 项检查全部符合期望（尤其 `health-check.sh` 退出码 0、微信有回复）。
 - 微信已配对：`hermes pairing list` 的已批准列表里有用户（微信里发消息有正常回复，不是配对码）。
 - 演练（若做）：`restore.log` 里从 `===== 开始恢复 =====` 到 `恢复结束` 有完整时间戳，恢复后重跑验证清单仍全绿，微信恢复对话。
 
@@ -3049,14 +2360,6 @@ pgrep -f "hermes-agent.*[g]ateway" && echo 网关在跑
 tail -f ~/.hermes/logs/weixin-gateway.log
 hermes send --to weixin:<chat_id> "测试消息"          # 回合外主动发消息（需 .env 里有 WEIXIN_TOKEN）
 
-# MuseAutoApprove（muse.ai 外联审批自动批准）
-APP=~/workspace/muse-guardian/MuseAutoApprove
-pgrep -f "[m]use-daemon.cjs" >/dev/null && echo "自动审批在跑" || echo "自动审批未在跑（看门狗会在一分钟内拉起）"
-tail -f "$APP/log/daemon-log.ndjson"                   # 主日志：心跳 / 审批 / 自愈事件
-(cd "$APP" && node work/muse-rpc.cjs list)             # 手动看审批列表
-touch "$APP/data/muse-daemon.stop"                     # 维护模式：停掉，且保活不再拉起
-rm -f "$APP/data/muse-daemon.stop"                     # 退出维护模式（看门狗下一分钟自动拉起）
-
 # 离线包刷新（换内核/换镜像后重做一次）
 # 见步骤 8 的 A 段命令
 ```
@@ -3078,16 +2381,13 @@ rm -f "$APP/data/muse-daemon.stop"                     # 退出维护模式（�
 3. **探针安装必须走 `run-probe-install.sh`。** 安装器按 cmdline 关键字清理进程，直接跑会把调用者自己的 shell 杀掉。
 4. **判断微信账号存在用 `compgen -G`，不要用 `[ -f dir/*.json ]`。** 后者在 glob 展开成多个文件时直接报 `too many arguments`、分支恒为假，症状就是"重建后网关起不来"。
 5. **`gateway.pid` 是 JSON，不是裸数字。** 想按 pid 精确 kill 就老老实实解析（`jq -r .pid` 或 python），别 `cat` 出来当数字用——否则那个分支永远命中不了，你以为在精确 kill，其实一直在走兜底。
-6. **密钥纪律**：严格按第二章规则 4（四条铁律）执行，MAA 的 muse.ai 密码例外见第六章。
+6. **密钥纪律**：严格按第二章规则 4（四条铁律）执行。
 7. **备份脚本不要加进 cron。** 它读三个活库；手动/按需跑即可。
 8. **HEALTH CHECK 的退出码就是契约**：0 健康静默、1 需恢复（实现只返回 0/1；hook 探针对 rc=1 立即唤醒，非 0/1 累计连续 3 次才唤醒）。平台 hook 探针/看门狗都依赖它，改脚本时不要改变语义。
 9. **看门狗/巡检里杀进程要避开自己**：`pgrep -f "hermes-agent.*[g]ateway"` 用中括号，枚举后排除 `$$` 和 `$PPID`，不要 `pkill -f` 一把梭（命令行里出现过关键字的东西会被一起杀掉，包括调用者）。
 10. **本手册不含任何真实密钥、域名、IP。** 所有敏感值都是占位符：`<PROBE_ID>`、`<API_SECRET>`、`<WORKER_URL>`、`<API_BASE_URL>`、`<MODEL_NAME>`。部署时替换，替换后文件权限 600，并且**不要**把替换过的文件复制进任何文档/仓库。
 
-11. **MuseAutoApprove 的凭据按用户要求走明文聊天**：muse.ai 账号密码由用户在聊天框直接发给 AI，AI 落盘 `data/credentials.json`（600）后不回显、不复述、不进文档；其他入口（沙盒内自己写文件、安全页面）实测走不通。落盘后可提醒用户自行改密。详见第六章。
-12. **装 MuseAutoApprove 前必须让用户选策略**：默认 `allow_always`（永久放行）意味着"以后这个域名的外联不再问用户"。没有用户明确同意不要装；想保守就用 `--decision allow_once`。`deny_always` 不是"更安全的开关"——它会让沙盒对外请求全部失败。
-13. **不要对 app 目录用 `git clean -x` / `git clean -xdf`**：`data/`（凭据、会话）与 `log/` 都在 `.gitignore` 里，`-x` 会把它们当垃圾删掉，结果是"升级完要重新登录"。
-14. **网关存活检测用 `hermes-agent.*[g]ateway`，不要用 `[g]ateway run`。** 网关进程的 cmdline 有两种形态：直接 `hermes gateway run`，或经 `python3 -I -c` 包装（参数在脚本内部赋值，cmdline 里只剩 `hermes-agent` 路径，不含 `gateway run` 子串）。用 `[g]ateway run` 检测会在第二种形态下**每轮误判网关已死**，触发每分钟空转一次恢复流程（`restore-hermes` 报"网关启动后仍无进程"，但网关其实一直在跑）。`health-check.sh` / `watchdog.sh` / `restore-hermes.sh` 三处已统一为 `hermes-agent.*[g]ateway`——**改脚本时三处要一起改，别只改一处**。
+11. **网关存活检测用 `hermes-agent.*[g]ateway`，不要用 `[g]ateway run`。** 网关进程的 cmdline 有两种形态：直接 `hermes gateway run`，或经 `python3 -I -c` 包装（参数在脚本内部赋值，cmdline 里只剩 `hermes-agent` 路径，不含 `gateway run` 子串）。用 `[g]ateway run` 检测会在第二种形态下**每轮误判网关已死**，触发每分钟空转一次恢复流程（`restore-hermes` 报"网关启动后仍无进程"，但网关其实一直在跑）。`health-check.sh` / `watchdog.sh` / `restore-hermes.sh` 三处已统一为 `hermes-agent.*[g]ateway`——**改脚本时三处要一起改，别只改一处**。
 
 ## 二十六、已知边界与待验证项（诚实清单）
 
@@ -3098,13 +2398,7 @@ rm -f "$APP/data/muse-daemon.stop"                     # 退出维护模式（�
 3. **Worker 的 Cron 触发器 / Durable Object 行为**：`wrangler.toml` 里声明了 `*/1 * * * *` 与 `0 * * * *` 两个 cron 和 `MetricsBroadcaster` DO；首次部署会自动创建 DO namespace（配置注释如此说）。上线后建议看一眼 Worker 的 Cron 日志确认定时任务在跑。
 4. **`weixin-qr-*.py` 用的是 iLink 的非公开接口**（`ilinkai.weixin.qq.com` 的 `ilink/bot/*`）。接口可能变更；脚本失败时先看返回体，再考虑是否需要调整参数（`bot_type=3`、App Id `bot`、客户端版本打包值）。
 5. **平台侧的 hook/开机钩子接口随平台版本变化**：本手册给的是 Muse/hatch 上的实测形态（Layer 2a 探针定义与 Layer 2b 钩子定义都落在 `/home/hatch/hooks/definitions/`，探针日志在 `~/hooks/logs/`；退化方案的 cron 任务定义落盘在 `~/workspace/goals/goal/crons/minutely/`）。换平台时要重新确认"hook 怎么注册""开机命令叫什么"。
-6. **MuseAutoApprove 的自动登录假设"纯密码登录"**：服务端流程是 restart → send-otp（发验证码邮件）→ confirm-password（密码信封），**全程不读邮件**。若账号开了二步验证 / 新设备确认，`--smoke` 会失败——属于设计边界，需要现场确认账号策略（见第六章 ⑤）。
-7. **审批接口是逆向复刻的**：`egress.approvals` / `egress.approval.decide` 的请求形状来自对 muse.ai 网页客户端的抓包复刻，平台改版后会失效。症状：`rpc error`、决策字段不被识别、握手超时。处理：回仓库拉最新代码覆盖 `work/`（保留 `data/`），并把报错原文记录下来。
-8. **日志尚未完全脱敏**：登录成功时日志会记下 `hatch_sess` 的前 36 个字符（UUID 形态，等价于完整会话值），`data/token-last.json` 含完整 JWT。所以 `log/` 与 `data/` 同级敏感——不要外发、不要贴群、不要提交。（改进方向：给登录日志做一次脱敏改造。）
-9. **`allow_always` 的作用域边界未实测**：`destination_domain` 对子域（`a.example.com` vs `b.example.com`）与端口是否全覆盖，需要用一次"牺牲域名"实测（第 16 步验收顺手做，别拿重要域名试）。
-10. **reader grant 类审批的永久 scope 是 `entity`** 而非 `destination_domain`：本工具默认 scope 对这类单不适用，会回退 `allow_once`；需要永久放行时改用 `--scope entity` 并实测。
-11. **同一账号只在一处跑守护**：多处同时跑会重复轮询同一批审批单——先批的生效，后批的记 `decide_error`（无害但吵）。多沙盒场景要么各配各的账号，要么用 `MUSE_VM_ID` 明确分工。
-12. **「设置 → 权限 → 直接网络协议」的滑块点击无视觉反馈**：这是 Muse.AI 网页端的 Bug——点完滑块不动，但开关实际已经打开。不要据此反复点击，也不要判定为失败。这两处开工设置（直接网络协议 + 连接器 → 浏览器）都是平台网页端配置，沙盒内读不到，只能靠用户确认；间接判据是第三章探测 2 的连通性。
-13. **专属福利活动是官方的**：X 页面带认证（活动链接见第二十三章 ⑤ 专属福利），可以放心告知用户。
-14. **微信首次私聊会被 Hermes 的 DM 配对拦下**：机器人先回 8 位配对码，需 `hermes pairing approve weixin <码>` 批准（配对数据在 `~/.hermes/pairing/`，码 1 小时有效、每平台最多 3 个待批、批准后永久可用）。WEIXIN_DM_POLICY 可调（open/allowlist/disabled/pairing），本手册不放开策略，只做一次性 approve。见步骤 10 ① 第 7 条。
-15. **网关 cmdline 的两种形态**：`hermes gateway run` 与 `python3 -I -c` 包装（cmdline 里是 hermes-agent 路径）。存活性检测已统一用 `hermes-agent.*[g]ateway` 覆盖两种（见铁律 14）；换平台 / 换 Hermes 版本后若检测又出现误报，先 `cat /proc/<网关pid>/cmdline` 看实际形态，再决定是否调整模式。
+6. **「设置 → 权限 → 直接网络协议」的滑块点击无视觉反馈**：这是 Muse.AI 网页端的 Bug——点完滑块不动，但开关实际已经打开。不要据此反复点击，也不要判定为失败。这两处开工设置（直接网络协议 + 连接器 → 浏览器）都是平台网页端配置，沙盒内读不到，只能靠用户确认；间接判据是第三章探测 2 的连通性。
+7. **专属福利活动是官方的**：X 页面带认证（活动链接见第二十三章 ⑤ 专属福利），可以放心告知用户。
+8. **微信首次私聊会被 Hermes 的 DM 配对拦下**：机器人先回 8 位配对码，需 `hermes pairing approve weixin <码>` 批准（配对数据在 `~/.hermes/pairing/`，码 1 小时有效、每平台最多 3 个待批、批准后永久可用）。WEIXIN_DM_POLICY 可调（open/allowlist/disabled/pairing），本手册不放开策略，只做一次性 approve。见步骤 10 ① 第 7 条。
+9. **网关 cmdline 的两种形态**：`hermes gateway run` 与 `python3 -I -c` 包装（cmdline 里是 hermes-agent 路径）。存活性检测已统一用 `hermes-agent.*[g]ateway` 覆盖两种（见铁律 14）；换平台 / 换 Hermes 版本后若检测又出现误报，先 `cat /proc/<网关pid>/cmdline` 看实际形态，再决定是否调整模式。
